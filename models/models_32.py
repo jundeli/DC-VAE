@@ -257,7 +257,7 @@ class DualEncoder(nn.Module):
         h3 = self.block3(h2)
         h4 = self.block4(h3)
         h = self.activation(h4)
-        h = h.sum(2).sum(2)
+        h = h.sum(2).sum(2) # reduce dimension twice
         h = self.l5(h)
         disc_out = self.head_disc(h)
         if mode == "dis":
@@ -287,39 +287,65 @@ class DualEncoder(nn.Module):
             return cont_out
         # return disc_out, cont_out
 
-class Encoder(nn.Module):
-    def __init__(self, zdim, activation=nn.ReLU()):
-        super(Encoder, self).__init__()
-        self.ch = df_dim
-        self.activation = activation
-        self.block1 = OptimizedDisBlock(3, self.ch)
-        self.block2 = DisBlock(
-            self.ch,
-            self.ch,
-            activation=activation,
-            downsample=True)
-        self.block3 = DisBlock(
-            self.ch,
-            self.ch,
-            activation=activation,
-            downsample=False)
-        self.block4 = DisBlock(
-            self.ch,
-            self.ch,
-            activation=activation,
-            downsample=False)
-        self.l5 = nn.Linear(self.ch, zdim*2, bias=False)
-        self.l5 = nn.utils.spectral_norm(self.l5)
 
-    def forward(self, x):
-        h = x
-        layers = [self.block1, self.block2, self.block3]
-        model = nn.Sequential(*layers)
-        h = model(h)
-        h = self.block4(h)
-        h = self.activation(h)
-        # Global average pooling
-        h = h.sum(2).sum(2)
-        output = self.l5(h)
-        return output
+# Define quantum layer
+import pennylane as qml
+from pennylane.templates import AmplitudeEmbedding
+n_qubits = 6
+dev = qml.device('default.qubit', wires=n_qubits)
+@qml.qnode(dev, interface='torch')
+
+def quantum_circuit(f, w):
+    # Quantum amplitude encoding
+    AmplitudeEmbedding(features=f, wires=range(n_qubits), normalize=True)
+
+    # Construct generator circuit for both atom vector and node matrix
+    for i in range(0, 2*(n_qubits-1), 2):
+        qml.CRX(w[i], wires=[i//2, i//2+1])
+        qml.CRZ(w[i+1], wires=[i//2, i//2+1])
+    return qml.probs(wires=[i for i in range(n_qubits)])
+
+
+# class Encoder(nn.Module):
+#     def __init__(self, zdim, activation=nn.ReLU()):
+#         super(Encoder, self).__init__()
+#         self.ch = df_dim
+#         self.activation = activation
+#         self.block1 = OptimizedDisBlock(3, self.ch)
+#         self.block2 = DisBlock(
+#             self.ch,
+#             self.ch,
+#             activation=activation,
+#             downsample=True)
+#         self.block3 = DisBlock(
+#             self.ch,
+#             self.ch,
+#             activation=activation,
+#             downsample=False)
+#         self.block4 = DisBlock(
+#             self.ch,
+#             self.ch,
+#             activation=activation,
+#             downsample=False)
+#         self.l5 = nn.Linear(self.ch, zdim*2, bias=False)
+#         self.l5 = nn.utils.spectral_norm(self.l5)   
+#         self.q_weights = torch.tensor(list(\
+#                     np.random.rand(n_qubits-1)*2*np.pi-np.pi), requires_grad=True)
+
+#     def forward(self, x):
+#         h = x
+#         layers = [self.block1, self.block2, self.block3]
+#         model = nn.Sequential(*layers)
+#         h = model(h)
+#         h = self.block4(h)
+#         h = self.activation(h)
+#         # Global average pooling
+#         h = h.sum(2).sum(2)
+#         output = self.l5(h)
+#         # print(output[0])
+#         h = [quantum_circuit(output[i].detach().numpy(), self.q_weights) for i in range(output.shape[0])]
+#         output = torch.stack(tuple(h)).to('cpu').float()
+#         # print("~~~~~~~~~~ after quantum layer")
+#         # print(output[0])
+#         return output
 
