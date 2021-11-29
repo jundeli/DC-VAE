@@ -30,7 +30,7 @@ cont_dim           = 16
 cont_k             = 8192
 cont_temp          = 0.07
 quantum            = True
-patches            = 2
+patches            = 4
 
 # multi-scale contrastive setting
 layers             = ["b1", "final"]
