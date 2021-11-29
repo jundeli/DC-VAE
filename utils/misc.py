@@ -79,8 +79,8 @@ log_p_z = NormalLogProb()
 log_p_x = BernoulliLogProb()
 
 latent_size = 128
-p_z_loc = torch.zeros(latent_size).cuda()
-p_z_scale = torch.ones(latent_size).cuda()
+p_z_loc = torch.zeros(latent_size)#.cuda()
+p_z_scale = torch.ones(latent_size)#.cuda()
 
 def get_many_z(img, netE, zdim, mode="train", clipping=False, n_samples=1):
     bs, imsize = img.shape[0], img.shape[2]
@@ -148,7 +148,7 @@ def log_p_x_and_z(z, img, netD, zdim, mode="train", clipping=False, n_samples=1)
 
 
 def fix_seed(random_seed=123):
-    torch.cuda.manual_seed(random_seed)
+    torch.manual_seed(random_seed)
     torch.manual_seed(random_seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
