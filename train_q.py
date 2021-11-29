@@ -169,7 +169,7 @@ ds = torchvision.datasets.CIFAR10(data_path, train=True, download=True,
                                     (0.5, 0.5, 0.5)),
                            ]))
 sub_ds = torch.utils.data.Subset(ds, list(range(1000)))
-train_loader = torch.utils.data.DataLoader(sub_ds, batch_size=dis_batch_size, 
+train_loader = torch.utils.data.DataLoader(ds, batch_size=dis_batch_size, 
                         shuffle=True, pin_memory=True, drop_last=True,
                         num_workers=num_workers)
 
@@ -181,7 +181,7 @@ ds = torchvision.datasets.CIFAR10(data_path, train=False, download=False,
                                     (0.5, 0.5, 0.5)),
                            ]))
 sub_ds = torch.utils.data.Subset(ds, list(range(200)))
-test_loader = torch.utils.data.DataLoader(sub_ds, batch_size=dis_batch_size, 
+test_loader = torch.utils.data.DataLoader(ds, batch_size=dis_batch_size, 
                         shuffle=True, pin_memory=True, drop_last=True,
                         num_workers=num_workers)
 
