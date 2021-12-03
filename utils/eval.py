@@ -45,7 +45,7 @@ def compute_fid_sample(netD, zdim, eval_bs=128, buf_dir=None):
     netD.eval()
     total = 0
     while total <= num_eval_imgs:
-        curr_z = torch.cuda.FloatTensor(np.random.normal(0, 1, (eval_bs, zdim)))
+        curr_z = torch.FloatTensor(np.random.normal(0, 1, (eval_bs, zdim)))
         curr_z = torch.clamp(curr_z, min=-1.0, max=1.0)
         imgs = netD(curr_z)
         out_imgs = imgs.mul_(127.5).add_(127.5).clamp(0.0,255.0)
