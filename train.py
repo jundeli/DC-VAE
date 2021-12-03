@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
+import pennylane as qml
 
 from models.models_32 import *
 from utils.misc import *
@@ -22,12 +23,14 @@ data_path          = "dataset"
 
 dis_batch_size     = 64
 gen_batch_size     = 128
-max_epoch          = 800
+max_epoch          = 500#800
 lambda_kld         = 1e-6
 latent_dim         = 128
 cont_dim           = 16
 cont_k             = 8192
 cont_temp          = 0.07
+quantum            = False
+patches            = 4
 
 # multi-scale contrastive setting
 layers             = ["b1", "final"]
@@ -49,20 +52,76 @@ fix_seed(random_seed=seed)
 #############################
 # Make and initialize the Networks
 #############################
-encoder = torch.nn.DataParallel(Encoder(latent_dim)).cuda()
-decoder = torch.nn.DataParallel(Decoder(latent_dim)).cuda()
-dual_encoder = torch.nn.DataParallel(DualEncoder(cont_dim)).cuda()
+if quantum:
+    q_weights = [torch.tensor(list(np.random.rand(2*(n_qubits-1))*2*np.pi-np.pi), \
+        requires_grad=True) for _ in range(patches)]
+
+class Encoder(nn.Module):
+    def __init__(self, zdim, activation=nn.ReLU()):
+        super(Encoder, self).__init__()
+        self.ch = df_dim
+        self.activation = activation
+        self.block1 = OptimizedDisBlock(3, self.ch)
+        self.block2 = DisBlock(
+            self.ch,
+            self.ch,
+            activation=activation,
+            downsample=True)
+        self.block3 = DisBlock(
+            self.ch,
+            self.ch,
+            activation=activation,
+            downsample=False)
+        self.block4 = DisBlock(
+            self.ch,
+            self.ch,
+            activation=activation,
+            downsample=False)
+        self.l5 = nn.Linear(self.ch, zdim*2, bias=False)
+        self.l5 = nn.utils.spectral_norm(self.l5)
+        if quantum:
+            self.l6 = nn.Linear(zdim*2, zdim*2, bias=False)
+
+    def forward(self, x):
+        h = x
+        layers = [self.block1, self.block2, self.block3]
+        model = nn.Sequential(*layers)
+        h = model(h)
+        h = self.block4(h)
+        h = self.activation(h)
+        # Global average pooling
+        h = h.sum(2).sum(2)
+        output = self.l5(h)
+        
+        if quantum:
+            # Add quantum layers
+            feature_len = latent_dim*2 // patches
+            hiddens = [0]*patches
+            for p in range(patches):
+                hiddens[p] = [quantum_circuit(output[i][\
+                    p*feature_len:(p+1)*feature_len].detach().numpy(), q_weights[p]) \
+                         for i in range(output.shape[0])]
+                hiddens[p] = torch.stack(tuple(hiddens[p])).to('cpu').float()
+
+            h = torch.cat(tuple(hiddens), 1)
+            output = self.l6(h)
+
+        return output
+
+encoder = torch.nn.DataParallel(Encoder(latent_dim))
+decoder = torch.nn.DataParallel(Decoder(latent_dim))
+dual_encoder = torch.nn.DataParallel(DualEncoder(cont_dim))
 encoder.apply(weights_init)
 decoder.apply(weights_init)
 dual_encoder.apply(weights_init)
-dual_encoder_M = torch.nn.DataParallel(DualEncoder(cont_dim)).cuda()
+dual_encoder_M = torch.nn.DataParallel(DualEncoder(cont_dim))
 for p, p_momentum in zip(dual_encoder.parameters(), dual_encoder_M.parameters()):
     p_momentum.data.copy_(p.data)
     p_momentum.requires_grad = False
 gen_avg_param = copy_params(decoder)
 d_queue, d_queue_ptr = {}, {}
 for layer in layers:
-    d_queue[layer] = torch.randn(cont_dim, cont_k).cuda()
+    d_queue[layer] = torch.randn(cont_dim, cont_k)
     d_queue[layer] = F.normalize(d_queue[layer], dim=0)
     d_queue_ptr[layer] = torch.zeros(1, dtype=torch.long)
 
@@ -70,9 +129,14 @@ for layer in layers:
 #############################
 # Make the optimizers
 #############################
-opt_encoder = torch.optim.Adam(filter(lambda p: p.requires_grad, 
-                                        encoder.parameters()),
-                                lr, (beta1, beta2))
+if quantum:
+    opt_encoder = torch.optim.Adam(filter(lambda p: p.requires_grad, 
+                                            list(encoder.parameters())+q_weights),
+                                    lr, (beta1, beta2))
+else:
+    opt_encoder = torch.optim.Adam(filter(lambda p: p.requires_grad, 
+                                            encoder.parameters()),
+                                    lr, (beta1, beta2))
 opt_decoder = torch.optim.Adam(filter(lambda p: p.requires_grad, 
                                         decoder.parameters()),
                                 lr, (beta1, beta2))
@@ -104,9 +168,11 @@ ds = torchvision.datasets.CIFAR10(data_path, train=True, download=True,
                                     (0.5, 0.5, 0.5), 
                                     (0.5, 0.5, 0.5)),
                            ]))
-train_loader = torch.utils.data.DataLoader(ds, batch_size=dis_batch_size, 
+sub_ds = torch.utils.data.Subset(ds, list(range(8000)))
+train_loader = torch.utils.data.DataLoader(sub_ds, batch_size=dis_batch_size, 
                         shuffle=True, pin_memory=True, drop_last=True,
                         num_workers=num_workers)
+
 ds = torchvision.datasets.CIFAR10(data_path, train=False, download=False,
                 transform=transforms.Compose([
                                transforms.ToTensor(),
@@ -114,7 +180,8 @@ ds = torchvision.datasets.CIFAR10(data_path, train=False, download=False,
                                     (0.5, 0.5, 0.5), 
                                     (0.5, 0.5, 0.5)),
                            ]))
-test_loader = torch.utils.data.DataLoader(ds, batch_size=dis_batch_size, 
+sub_ds = torch.utils.data.Subset(ds, list(range(2000)))
+test_loader = torch.utils.data.DataLoader(sub_ds, batch_size=dis_batch_size, 
                         shuffle=True, pin_memory=True, drop_last=True,
                         num_workers=num_workers)
 
@@ -127,8 +194,8 @@ for epoch in tqdm(range(max_epoch), desc='total progress'):
     for iter_idx, (imgs, _) in enumerate(tqdm(train_loader)):
         curr_bs = imgs.shape[0]
         curr_log = f"{epoch}:{iter_idx}\t"
-        real_imgs = imgs.type(torch.cuda.FloatTensor)
-        z = torch.cuda.FloatTensor(np.random.normal(0, 1, (imgs.shape[0], latent_dim)))
+        real_imgs = imgs.type(torch.FloatTensor)
+        z = torch.FloatTensor(np.random.normal(0, 1, (imgs.shape[0], latent_dim)))
         # ---------------------
         #  Train Discriminator
         # ---------------------
@@ -154,7 +221,7 @@ for epoch in tqdm(range(max_epoch), desc='total progress'):
         if global_steps % 5 == 0:
             opt_decoder.zero_grad()
             opt_encoder.zero_grad()
-            gen_z = torch.cuda.FloatTensor(np.random.normal(0, 1, (gen_batch_size, latent_dim)))
+            gen_z = torch.FloatTensor(np.random.normal(0, 1, (gen_batch_size, latent_dim)))
             gen_imgs = decoder(gen_z)
             fake_validity = dual_encoder(gen_imgs, mode="dis")
             rec, mu, logvar = f_recon(real_imgs, encoder, decoder, latent_dim)
@@ -182,7 +249,7 @@ for epoch in tqdm(range(max_epoch), desc='total progress'):
                 d_k = dual_encoder_M(im_k, mode="cont")
                 for l in layers:
                     d_k[l] = F.normalize(d_k[l], dim=1)
-            total_cont = torch.tensor(0.0).cuda()
+            total_cont = torch.tensor(0.0)
             d_q = dual_encoder(im_q, mode="cont")
             for l in layers:
                 q = F.normalize(d_q[l], dim=1)
@@ -191,7 +258,7 @@ for epoch in tqdm(range(max_epoch), desc='total progress'):
                 l_pos = torch.einsum("nc,nc->n", [k,q]).unsqueeze(-1)
                 l_neg = torch.einsum('nc,ck->nk', [q,queue.detach()])
                 logits = torch.cat([l_pos, l_neg], dim=1) / cont_temp#0.07
-                labels = torch.zeros(logits.shape[0], dtype=torch.long).cuda()
+                labels = torch.zeros(logits.shape[0], dtype=torch.long)
                 cont_loss = nn.CrossEntropyLoss()(logits, labels) * lambda_cont
                 total_cont += cont_loss
                 acc1, acc5 = accuracy(logits, labels, topk=(1, 5))
