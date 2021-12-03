@@ -23,7 +23,7 @@ data_path          = "dataset"
 
 dis_batch_size     = 64
 gen_batch_size     = 128
-max_epoch          = 100#800
+max_epoch          = 500#800
 lambda_kld         = 1e-6
 latent_dim         = 128
 cont_dim           = 16
@@ -168,8 +168,8 @@ ds = torchvision.datasets.CIFAR10(data_path, train=True, download=True,
                                     (0.5, 0.5, 0.5), 
                                     (0.5, 0.5, 0.5)),
                            ]))
-sub_ds = torch.utils.data.Subset(ds, list(range(1000)))
-train_loader = torch.utils.data.DataLoader(ds, batch_size=dis_batch_size, 
+sub_ds = torch.utils.data.Subset(ds, list(range(8000)))
+train_loader = torch.utils.data.DataLoader(sub_ds, batch_size=dis_batch_size, 
                         shuffle=True, pin_memory=True, drop_last=True,
                         num_workers=num_workers)
 
@@ -180,8 +180,8 @@ ds = torchvision.datasets.CIFAR10(data_path, train=False, download=False,
                                     (0.5, 0.5, 0.5), 
                                     (0.5, 0.5, 0.5)),
                            ]))
-sub_ds = torch.utils.data.Subset(ds, list(range(200)))
-test_loader = torch.utils.data.DataLoader(ds, batch_size=dis_batch_size, 
+sub_ds = torch.utils.data.Subset(ds, list(range(2000)))
+test_loader = torch.utils.data.DataLoader(sub_ds, batch_size=dis_batch_size, 
                         shuffle=True, pin_memory=True, drop_last=True,
                         num_workers=num_workers)
 
