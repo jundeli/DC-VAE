@@ -13,7 +13,7 @@ def compute_fid_recon(netE, netD, dl, zdim, eval_bs=128, buf_dir=None):
     if not os.path.exists(buf_dir):
         os.makedirs(buf_dir)
     fid_stat = "./utils/fid_stats_cifar10_train.npz"
-    num_eval_imgs = 50000
+    num_eval_imgs = 500#00
     netE.eval()
     netD.eval()
     total = 0
@@ -41,7 +41,7 @@ def compute_fid_sample(netD, zdim, eval_bs=128, buf_dir=None):
     if not os.path.exists(buf_dir):
         os.makedirs(buf_dir)
     fid_stat = "utils/fid_stats_cifar10_train.npz"
-    num_eval_imgs = 50000
+    num_eval_imgs = 500#00
     netD.eval()
     total = 0
     while total <= num_eval_imgs:
